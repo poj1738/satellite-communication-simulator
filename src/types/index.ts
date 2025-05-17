@@ -57,6 +57,7 @@ export interface SimulationResult {
   };
   allIridiumPositions?: Position[]; // Optional array for all Iridium satellite positions
   allContactData?: { [satelliteId: number]: Uint8Array }; // Optional contact data per satellite
+  allSatellites?: any[]; // Optional array for all Iridium satellite information
 }
 
 export interface WorkerMessage {

@@ -9,6 +9,11 @@ import type { SatelliteInfo } from '../lib/tleService';
 const SCALE_FACTOR = 0.001;
 const EARTH_RADIUS = 6371 * SCALE_FACTOR;
 
+// Utility function to convert radians to degrees
+function rad2deg(rad: number): number {
+  return rad * 180 / Math.PI;
+}
+
 interface OrbitViewerProps {
   result: SimulationResult | null;
   currentTime: number;
@@ -18,8 +23,15 @@ interface OrbitViewerProps {
 const Earth = () => {
   return (
     <mesh>
-      <sphereGeometry args={[EARTH_RADIUS, 32, 32]} />
-      <meshPhongMaterial color="#2233ff" opacity={0.8} transparent />
+      <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
+      <meshPhongMaterial 
+        color="#2244aa" 
+        emissive="#001133"
+        opacity={0.9} 
+        transparent 
+        specular="#aaddff"
+        shininess={10}
+      />
     </mesh>
   );
 };
@@ -38,16 +50,17 @@ interface SatelliteProps {
   showLabel?: boolean;
   trailLength?: number; // Trail length in seconds
   currentTime: number;
+  planeNumber?: number;
 }
 
-const Satellite = ({ position, color, name, showLabel = true, trailLength = 5, currentTime }: SatelliteProps) => {
+const Satellite = ({ position, color, name, showLabel = true, trailLength = 5, currentTime, planeNumber }: SatelliteProps) => {
   const satelliteRef = useRef<Group>(null);
   
   // Scale positions for visualization
   const scaledPosition = new Vector3(
     position.x * SCALE_FACTOR,
-    position.z * SCALE_FACTOR, // Swap Y and Z for better visualization
-    position.y * SCALE_FACTOR
+    position.y * SCALE_FACTOR, // Keep y as y for proper 3D positioning
+    position.z * SCALE_FACTOR
   );
   
   return (
@@ -64,7 +77,7 @@ const Satellite = ({ position, color, name, showLabel = true, trailLength = 5, c
               borderRadius: '3px',
               fontSize: '11px' 
             }}>
-              {name}
+              {planeNumber !== undefined ? `${name} (P${planeNumber})` : name}
             </div>
           </Html>
         )}
@@ -87,14 +100,14 @@ const Connection = ({ start, end, isActive }: ConnectionProps) => {
   // Calculate start and end points for the connection line
   const startVec: [number, number, number] = [
     start.x * SCALE_FACTOR,
-    start.z * SCALE_FACTOR,
-    start.y * SCALE_FACTOR
+    start.y * SCALE_FACTOR,
+    start.z * SCALE_FACTOR
   ];
   
   const endVec: [number, number, number] = [
     end.x * SCALE_FACTOR,
-    end.z * SCALE_FACTOR,
-    end.y * SCALE_FACTOR
+    end.y * SCALE_FACTOR,
+    end.z * SCALE_FACTOR
   ];
   
   const points: [number, number, number][] = [startVec, endVec];
@@ -120,40 +133,44 @@ interface OrbitPathProps {
 }
 
 const OrbitPath = ({ altitude, inclination, raan, color }: OrbitPathProps) => {
-  // Create orbit path with proper rotation
-  const orbitRef = useRef<Group>(null);
-  
   // Create points for the orbit path
-  const segments = 64;
+  const segments = 128; // Increase segments for smoother orbit
   const radius = (6371 + altitude) * SCALE_FACTOR;
   const points: [number, number, number][] = [];
   
+  // Generate points with rotation applied directly to each point
   for (let i = 0; i <= segments; i++) {
     const theta = (i / segments) * Math.PI * 2;
-    points.push([
-      radius * Math.cos(theta),
-      0,
-      radius * Math.sin(theta)
-    ]);
+    
+    // Step 1: Position in x-y plane
+    const x_plane = radius * Math.cos(theta);
+    const y_plane = radius * Math.sin(theta);
+    
+    // Step 2: Apply inclination rotation (around x-axis)
+    const cosInc = Math.cos(inclination);
+    const sinInc = Math.sin(inclination);
+    
+    const y_inclined = y_plane * cosInc;
+    const z_inclined = y_plane * sinInc;
+    
+    // Step 3: Apply RAAN rotation (around z-axis)
+    const cosRAAN = Math.cos(raan);
+    const sinRAAN = Math.sin(raan);
+    
+    const x_final = x_plane * cosRAAN - y_inclined * sinRAAN;
+    const y_final = x_plane * sinRAAN + y_inclined * cosRAAN;
+    
+    points.push([x_final, y_final, z_inclined]);
   }
-  
-  // Apply rotations to the group
-  useEffect(() => {
-    if (orbitRef.current) {
-      orbitRef.current.rotation.x = inclination;
-      orbitRef.current.rotation.y = raan;
-    }
-  }, [inclination, raan]);
 
   return (
-    <group ref={orbitRef}>
-      <Line 
-        points={points}
-        color={color}
-        opacity={0.5}
-        transparent
-      />
-    </group>
+    <Line 
+      points={points}
+      color={color}
+      lineWidth={1.5}
+      opacity={0.7}
+      transparent
+    />
   );
 };
 
@@ -166,27 +183,40 @@ function orbitalPeriod(a: number): number {
 function positionInOrbit(t: number, altitude: number, inclination: number, raan: number, phaseOffset: number): Position {
   const R_EARTH = 6371; // Earth radius (km)
   const a = R_EARTH + altitude; // Semi-major axis
+  
+  // Speed up time moderately for the visualizer
+  const timeMultiplier = 20; // 20x speed for visualization - visible but not overly fast
+  
+  // Use a smooth time value to avoid jerky animation when animation skips frames
+  // Use fractional remainder to get smooth transitions when looping
+  const smoothTime = (t * timeMultiplier) % (24 * 60 * 60);
+  
   const T = orbitalPeriod(a);  // Orbital period
   const n = 2 * Math.PI / T;   // Mean motion
-  const theta = n * t + phaseOffset; // True anomaly
+  const theta = n * smoothTime + phaseOffset; // True anomaly
 
-  const cosRAAN = Math.cos(raan);
-  const sinRAAN = Math.sin(raan);
+  // Step 1: Position in x-y plane
+  const x_plane = a * Math.cos(theta);
+  const y_plane = a * Math.sin(theta);
+  
+  // Step 2: Apply inclination rotation (around x-axis)
   const cosInc = Math.cos(inclination);
   const sinInc = Math.sin(inclination);
-
-  // Position in orbital plane
-  const x_orbit = a * Math.cos(theta);
-  const y_orbit = a * Math.sin(theta);
   
-  // Rotate to ECI frame
-  const x1 = cosRAAN * x_orbit - sinRAAN * y_orbit;
-  const y1 = sinRAAN * x_orbit + cosRAAN * y_orbit;
+  const y_inclined = y_plane * cosInc;
+  const z_inclined = y_plane * sinInc;
+  
+  // Step 3: Apply RAAN rotation (around z-axis)
+  const cosRAAN = Math.cos(raan);
+  const sinRAAN = Math.sin(raan);
+  
+  const x_final = x_plane * cosRAAN - y_inclined * sinRAAN;
+  const y_final = x_plane * sinRAAN + y_inclined * cosRAAN;
   
   return {
-    x: x1,
-    y: y1 * cosInc,
-    z: y1 * sinInc
+    x: x_final,
+    y: y_final,
+    z: z_inclined
   };
 }
 
@@ -201,7 +231,6 @@ interface IridiumConstellationProps {
   satellites: SatelliteInfo[];
   referenceAltitude: number;
   referenceInclination: number;
-  referenceRAAN: number;
   currentTime: number;
   contactData?: { [satelliteId: number]: Uint8Array };
   beaconPosition: Position;
@@ -211,30 +240,52 @@ const IridiumConstellation: React.FC<IridiumConstellationProps> = ({
   satellites, 
   referenceAltitude, 
   referenceInclination, 
-  referenceRAAN, 
   currentTime,
   contactData,
   beaconPosition
 }) => {
   if (!satellites || satellites.length === 0) return null;
   
-  console.log(`Rendering Iridium constellation with ${satellites.length} satellites`);
+  // console.log(`Rendering Iridium constellation with ${satellites.length} satellites`);
   
   return (
     <>
+      {/* First render all orbit paths to visualize the orbital planes */}
       {satellites.map((satellite, index) => {
-        // Determine phase offset for each satellite to distribute them in the constellation
-        // This is a simplified way to place satellites in orbit
-        const phaseOffset = (index / satellites.length) * 2 * Math.PI;
-        
-        // Use the actual satellite's altitude and inclination if available
         const altitude = satellite.altitude || referenceAltitude;
         const inclination = Math.PI * satellite.inclination / 180.0 || referenceInclination;
+        const raan = Math.PI * satellite.raan / 180.0; // Use satellite's own RAAN
         
-        // Calculate RAAN staggered by satellite index
-        const raan = referenceRAAN + (index % 6) * (Math.PI / 3);
+        const plane = Math.floor(index / 11);
+        const planeColors = [
+          "#00FF00", "#00AAFF", "#FF2222", 
+          "#FFAA00", "#AA00FF", "#FFFF00"
+        ];
+        const planeColor = planeColors[plane % planeColors.length];
         
-        // Calculate position for this satellite
+        return (
+          <React.Fragment key={`orbit-${satellite.id}-${index}`}> {/* Added index for more unique key */}
+            <OrbitPath
+              altitude={altitude}
+              inclination={inclination}
+              raan={raan}
+              color={planeColor}
+            />
+          </React.Fragment>
+        );
+      })}
+      
+      {/* Then render all satellites */}
+      {satellites.map((satellite, index) => {
+        const altitude = satellite.altitude || referenceAltitude;
+        const inclination = Math.PI * satellite.inclination / 180.0 || referenceInclination;
+        const raan = Math.PI * satellite.raan / 180.0; // Use satellite's own RAAN
+        
+        const plane = Math.floor(index / 11);
+        const inPlanePosition = index % 11;
+        const phaseSpacing = 2 * Math.PI / 11;
+        const phaseOffset = satellite.initialPhase !== undefined ? satellite.initialPhase : (inPlanePosition * phaseSpacing);
+        
         const position = positionInOrbit(
           currentTime,
           altitude,
@@ -243,24 +294,28 @@ const IridiumConstellation: React.FC<IridiumConstellationProps> = ({
           phaseOffset
         );
         
-        // Check if this satellite is in contact with the beacon
+        const planeColors = [
+            "#00FF00", "#00AAFF", "#FF2222",
+            "#FFAA00", "#AA00FF", "#FFFF00"
+        ];
+        const planeColor = planeColors[plane % planeColors.length];
+        
         const isInContact = contactData && 
-                            contactData[satellite.id] && 
-                            currentTime < contactData[satellite.id].length && 
-                            !!contactData[satellite.id][Math.floor(currentTime)];
+                          satellite.id !== undefined && // Check if satellite.id is defined
+                          contactData[satellite.id] && 
+                          currentTime < contactData[satellite.id].length && 
+                          !!contactData[satellite.id][Math.floor(currentTime)];
         
         return (
-          <React.Fragment key={satellite.id}>
-            {/* Render the satellite */}
+          <React.Fragment key={`sat-${satellite.id}-${index}`}> {/* Added index for more unique key */}
             <Satellite 
               position={position}
-              color="#22ff22"
+              color={planeColor}
               name={satellite.name}
-              showLabel={false} // Only show labels for a few satellites to avoid clutter
+              showLabel={false}
               currentTime={currentTime}
+              planeNumber={plane + 1}
             />
-            
-            {/* Render yellow line only when there's a handshake */}
             {isInContact && (
               <Connection 
                 start={beaconPosition}
@@ -276,9 +331,7 @@ const IridiumConstellation: React.FC<IridiumConstellationProps> = ({
 };
 
 const Scene = ({ result, currentTime }: SceneProps) => {
-  // Check for null or undefined initial positions
   if (!result.initialPositions || !result.initialPositions.beacon || !result.initialPositions.iridium) {
-    // Return a default scene with Earth only if no initial positions
     return (
       <>
         <ambientLight intensity={0.2} />
@@ -289,127 +342,87 @@ const Scene = ({ result, currentTime }: SceneProps) => {
     );
   }
 
-  // Get actual parameters from the simulation results
   const beaconPosition = result.initialPositions.beacon;
-  const iridiumPosition = result.initialPositions.iridium;
+  const iridiumPosition = result.initialPositions.iridium; // This is the first Iridium sat
   
-  // Calculate altitude from position vectors
-  const beaconAltitude = Math.sqrt(
-    Math.pow(beaconPosition.x, 2) + 
-    Math.pow(beaconPosition.y, 2) + 
-    Math.pow(beaconPosition.z, 2)
-  ) - 6371;
+  const beaconAltitude = Math.sqrt(beaconPosition.x**2 + beaconPosition.y**2 + beaconPosition.z**2) - 6371;
+  const iridiumReferenceAltitude = Math.sqrt(iridiumPosition.x**2 + iridiumPosition.y**2 + iridiumPosition.z**2) - 6371;
   
-  const iridiumAltitude = Math.sqrt(
-    Math.pow(iridiumPosition.x, 2) + 
-    Math.pow(iridiumPosition.y, 2) + 
-    Math.pow(iridiumPosition.z, 2)
-  ) - 6371;
+  const beaconInclination = Math.asin(beaconPosition.z / Math.sqrt(beaconPosition.x**2 + beaconPosition.y**2 + beaconPosition.z**2));
+  const iridiumReferenceInclination = Math.asin(iridiumPosition.z / Math.sqrt(iridiumPosition.x**2 + iridiumPosition.y**2 + iridiumPosition.z**2));
   
-  // Estimate inclination from initial position
-  const beaconInclination = Math.asin(
-    beaconPosition.z / 
-    Math.sqrt(
-      Math.pow(beaconPosition.x, 2) + 
-      Math.pow(beaconPosition.y, 2) + 
-      Math.pow(beaconPosition.z, 2)
-    )
-  );
-  
-  const iridiumInclination = Math.asin(
-    iridiumPosition.z / 
-    Math.sqrt(
-      Math.pow(iridiumPosition.x, 2) + 
-      Math.pow(iridiumPosition.y, 2) + 
-      Math.pow(iridiumPosition.z, 2)
-    )
-  );
-  
-  // Estimate RAAN from initial position
   const beaconRAAN = Math.atan2(beaconPosition.y, beaconPosition.x);
-  const iridiumRAAN = Math.atan2(iridiumPosition.y, iridiumPosition.x);
+  const iridiumReferenceRAAN = Math.atan2(iridiumPosition.y, iridiumPosition.x);
   
-  // Calculate current positions based on orbital mechanics
-  const currentBeaconPosition = positionInOrbit(
-    currentTime, 
-    beaconAltitude, 
-    beaconInclination, 
-    beaconRAAN, 
-    0
-  );
+  const currentBeaconPosition = positionInOrbit(currentTime, beaconAltitude, beaconInclination, beaconRAAN, 0);
   
-  const currentIridiumPosition = positionInOrbit(
-    currentTime, 
-    iridiumAltitude, 
-    iridiumInclination, 
-    iridiumRAAN, 
-    Math.PI/3
-  );
-  
-  // Check if satellites are in contact at the current time
-  const isInContact = currentTime < result.contactFlags.length 
-    ? !!result.contactFlags[Math.floor(currentTime)] 
-    : false;
-  
-  // Check if we're showing all Iridium satellites
-  const showingAllSatellites = result.allContactData !== undefined && result.allIridiumPositions !== undefined;
+  const showingAllSatellites = result.allSatellites && result.allSatellites.length > 0;
 
-  // Debug log to verify positions
-  console.log('Current Positions:', {
-    time: currentTime,
-    beacon: currentBeaconPosition,
-    iridium: currentIridiumPosition,
-    inContact: isInContact
-  });
+  // console.log('Current Positions:', { /* ... */ });
+  // console.log('Satellites data:', { /* ... */ });
 
   return (
     <>
       <ambientLight intensity={0.2} />
       <pointLight position={[10, 10, 10]} intensity={1} />
-      
+      <directionalLight position={[5, 5, 5]} intensity={0.5} />
       <Earth />
-      
-      {/* Always render the Beacon satellite */}
       <Satellite 
         position={currentBeaconPosition} 
         color="#ff2222" 
         name="Beacon"
         currentTime={currentTime}
+        showLabel={true}
       />
-      
-      {/* Either show single Iridium satellite or the constellation */}
       {!showingAllSatellites ? (
         <>
-          {/* Render Iridium satellite explicitly */}
+          <OrbitPath altitude={beaconAltitude} inclination={beaconInclination} raan={beaconRAAN} color="#ff8888" />
+          {/* For single Iridium satellite view, use its specific data if available, or reference if not */}
+          <OrbitPath
+            altitude={result.allSatellites?.[0]?.altitude || iridiumReferenceAltitude}
+            inclination={Math.PI * (result.allSatellites?.[0]?.inclination || rad2deg(iridiumReferenceInclination)) / 180.0}
+            raan={Math.PI * (result.allSatellites?.[0]?.raan || rad2deg(iridiumReferenceRAAN)) / 180.0}
+            color="#88ff88"
+          />
           <Satellite 
-            position={currentIridiumPosition} 
+            position={positionInOrbit(
+              currentTime, 
+              result.allSatellites?.[0]?.altitude || iridiumReferenceAltitude, 
+              Math.PI * (result.allSatellites?.[0]?.inclination || rad2deg(iridiumReferenceInclination)) / 180.0, 
+              Math.PI * (result.allSatellites?.[0]?.raan || rad2deg(iridiumReferenceRAAN)) / 180.0, 
+              result.allSatellites?.[0]?.initialPhase || Math.PI/3
+            )} 
             color="#22ff22"
-            name="Iridium"
+            name={result.allSatellites?.[0]?.name || "Iridium"}
             currentTime={currentTime}
           />
-          
-          {/* Yellow line shows connection when handshake occurs */}
-          {isInContact && (
+          {currentTime < result.contactFlags.length && !!result.contactFlags[Math.floor(currentTime)] && (
             <Connection 
               start={currentBeaconPosition}
-              end={currentIridiumPosition}
+              end={positionInOrbit(
+                currentTime, 
+                result.allSatellites?.[0]?.altitude || iridiumReferenceAltitude, 
+                Math.PI * (result.allSatellites?.[0]?.inclination || rad2deg(iridiumReferenceInclination)) / 180.0, 
+                Math.PI * (result.allSatellites?.[0]?.raan || rad2deg(iridiumReferenceRAAN)) / 180.0, 
+                result.allSatellites?.[0]?.initialPhase || Math.PI/3
+              )}
               isActive={true}
             />
           )}
         </>
       ) : (
-        /* Show all Iridium satellites if data is available */
-        <IridiumConstellation 
-          satellites={(result as any).allSatellites || []}
-          referenceAltitude={iridiumAltitude}
-          referenceInclination={iridiumInclination}
-          referenceRAAN={iridiumRAAN}
-          currentTime={currentTime}
-          contactData={result.allContactData}
-          beaconPosition={currentBeaconPosition}
-        />
+        <>
+          <OrbitPath altitude={beaconAltitude} inclination={beaconInclination} raan={beaconRAAN} color="#ff8888" />
+          <IridiumConstellation 
+            satellites={result.allSatellites || []}
+            referenceAltitude={iridiumReferenceAltitude}      // Pass reference altitude
+            referenceInclination={iridiumReferenceInclination} // Pass reference inclination
+            currentTime={currentTime}
+            contactData={result.allContactData}
+            beaconPosition={currentBeaconPosition}
+          />
+        </>
       )}
-      
       <OrbitControls />
     </>
   );
@@ -422,7 +435,9 @@ const OrbitViewer: React.FC<OrbitViewerProps> = ({ result, currentTime }) => {
 
   return (
     <div className="orbit-viewer">
-      <Canvas camera={{ position: [0, 15, 15], fov: 50 }}>
+      <Canvas camera={{ position: [40, 30, 40], fov: 30 }}>
+        <color attach="background" args={['#000']} />
+        <ambientLight intensity={0.3} />
         <Scene result={result} currentTime={currentTime} />
       </Canvas>
     </div>

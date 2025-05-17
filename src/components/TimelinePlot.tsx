@@ -54,7 +54,12 @@ const TimelinePlot: React.FC<TimelinePlotProps> = ({ contactFlags, currentTime =
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    const totalTime = contactFlags.length;
+    // In our simulation, each array element represents 1 minute
+    const totalMinutes = contactFlags.length;
+    
+    // Assuming a 24-hour (1440 minute) simulation
+    const expectedTotalMinutes = 24 * 60;
+    
     const width = canvas.width;
     const height = canvas.height;
     
@@ -70,8 +75,8 @@ const TimelinePlot: React.FC<TimelinePlotProps> = ({ contactFlags, currentTime =
     ctx.fillStyle = '#4CAF50';
     
     windows.forEach(window => {
-      const startX = (window.start / totalTime) * width;
-      const endX = (window.end / totalTime) * width;
+      const startX = (window.start / totalMinutes) * width;
+      const endX = (window.end / totalMinutes) * width;
       ctx.fillRect(startX, 0, endX - startX, height);
     });
     
@@ -80,13 +85,16 @@ const TimelinePlot: React.FC<TimelinePlotProps> = ({ contactFlags, currentTime =
     ctx.lineWidth = 1;
     ctx.beginPath();
     
+    // Calculate minutes per hour based on actual data length
+    const minutesPerHour = totalMinutes / 24;
+    
     for (let hour = 0; hour <= 24; hour++) {
-      const x = (hour * 3600 / totalTime) * width;
+      const x = (hour * minutesPerHour / totalMinutes) * width;
       ctx.moveTo(x, 0);
       ctx.lineTo(x, height);
       
-      // Add hour labels
-      if (hour % 4 === 0) {
+      // Add hour labels for every 2 hours to avoid crowding
+      if (hour % 2 === 0 || hour === 24) {
         ctx.fillStyle = '#333';
         ctx.font = '12px Arial';
         ctx.fillText(`${hour}h`, x + 2, 14);
@@ -96,8 +104,8 @@ const TimelinePlot: React.FC<TimelinePlotProps> = ({ contactFlags, currentTime =
     ctx.stroke();
     
     // Draw the tracker bar at current time
-    if (currentTime >= 0 && currentTime < totalTime) {
-      const trackerX = (currentTime / totalTime) * width;
+    if (currentTime >= 0 && currentTime < totalMinutes) {
+      const trackerX = (currentTime / totalMinutes) * width;
       
       // Draw tracker line
       ctx.beginPath();
@@ -113,11 +121,14 @@ const TimelinePlot: React.FC<TimelinePlotProps> = ({ contactFlags, currentTime =
       ctx.arc(trackerX, height - 5, 5, 0, Math.PI * 2);
       ctx.fill();
       
-      // Show current time label
-      const currentHour = (currentTime / 3600).toFixed(1);
+      // Format current time as hours:minutes
+      const currentHour = Math.floor(currentTime / 60);
+      const currentMinute = currentTime % 60;
+      const timeLabel = `${currentHour}h:${currentMinute.toString().padStart(2, '0')}m`;
+      
       ctx.fillStyle = '#ff0000';
       ctx.font = 'bold 12px Arial';
-      ctx.fillText(`${currentHour}h`, trackerX + 5, height - 10);
+      ctx.fillText(timeLabel, trackerX + 5, height - 10);
     }
     
   }, [contactFlags, currentTime]);

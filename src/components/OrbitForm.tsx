@@ -13,7 +13,7 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
   const [beaconAltitude, setBeaconAltitude] = useState<number>(600);
   const [beaconInclination, setBeaconInclination] = useState<number>(97.5);
   const [beaconLST, setBeaconLST] = useState<number>(11);
-  const [beaconAntennaHalfAngle, setBeaconAntennaHalfAngle] = useState<number>(70);
+  const [beaconAntennaHalfAngle, setBeaconAntennaHalfAngle] = useState<number>(60);
   
   const [iridiumSatelliteId, setIridiumSatelliteId] = useState<number>(1);
   const [iridiumAntennaHalfAngle, setIridiumAntennaHalfAngle] = useState<number>(31);
@@ -43,14 +43,16 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
         console.error('Failed to load Iridium TLEs:', error);
         setTleError('Failed to load satellite data. Using fallback data.');
         
-        // Create fallback data
-        const fallbackSatellites = Array.from({ length: 66 }, (_, i) => ({
+        // Create fallback data with initialPhase property
+        const fallbackSatellites: SatelliteInfo[] = Array.from({ length: 66 }, (_, i) => ({
           id: i + 1,
           name: `IRIDIUM ${i + 1}`,
           altitude: 781,
           inclination: 86.4,
+          raan: (Math.ceil((i + 1) / 11) - 1) * 31.6, // Distribute RAAN based on plane
           satrec: null as any,
-          tle: { name: '', line1: '', line2: '' }
+          tle: { name: '', line1: '', line2: '' },
+          initialPhase: Math.random() * 2 * Math.PI  // Add a random phase between 0 and 2π
         }));
         
         setIridiumSatellites(fallbackSatellites);
@@ -71,8 +73,10 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
                              name: 'IRIDIUM 1',
                              altitude: 781,
                              inclination: 86.4,
+                             raan: 0,
                              satrec: null as any,
-                             tle: { name: '', line1: '', line2: '' }
+                             tle: { name: '', line1: '', line2: '' },
+                             initialPhase: 0
                            });
     
     const params: SimulationParams = {
@@ -128,26 +132,48 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
           <div className="form-group">
             <label htmlFor="beacon-altitude">Altitude (km):</label>
             <input 
-              type="number" 
+              type="text" 
               id="beacon-altitude" 
-              value={beaconAltitude}
-              onChange={(e) => setBeaconAltitude(Number(e.target.value))}
+              value={beaconAltitude === 0 ? '' : beaconAltitude.toString()}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '') {
+                  setBeaconAltitude(0);
+                } else {
+                  const parsedValue = parseFloat(value);
+                  if (!isNaN(parsedValue)) {
+                    setBeaconAltitude(parsedValue);
+                  }
+                }
+              }}
               min="200"
               max="2000"
+              step="0.1"
             />
+            <div className="focus-indicator"></div>
           </div>
           
           {beaconMode === 'sun-synchronous' && (
             <div className="form-group">
               <label htmlFor="beacon-lst">Local Solar Time (hours):</label>
               <input 
-                type="number" 
+                type="text" 
                 id="beacon-lst" 
-                value={beaconLST}
-                onChange={(e) => setBeaconLST(Number(e.target.value))}
+                value={beaconLST === 0 ? '' : beaconLST.toString()}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '') {
+                    setBeaconLST(0);
+                  } else {
+                    const parsedValue = parseFloat(value);
+                    if (!isNaN(parsedValue)) {
+                      setBeaconLST(parsedValue);
+                    }
+                  }
+                }}
                 min="0"
                 max="24"
-                step="0.5"
+                step="0.1"
               />
             </div>
           )}
@@ -156,10 +182,20 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
             <div className="form-group">
               <label htmlFor="beacon-inclination">Inclination (degrees):</label>
               <input 
-                type="number" 
+                type="text" 
                 id="beacon-inclination" 
-                value={beaconInclination}
-                onChange={(e) => setBeaconInclination(Number(e.target.value))}
+                value={beaconInclination === 0 ? '' : beaconInclination.toString()}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '') {
+                    setBeaconInclination(0);
+                  } else {
+                    const parsedValue = parseFloat(value);
+                    if (!isNaN(parsedValue)) {
+                      setBeaconInclination(parsedValue);
+                    }
+                  }
+                }}
                 min="0"
                 max="180"
                 step="0.1"
@@ -170,13 +206,27 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
           <div className="form-group">
             <label htmlFor="beacon-antenna">Antenna Half-Angle (degrees):</label>
             <input 
-              type="number" 
+              type="text" 
               id="beacon-antenna" 
-              value={beaconAntennaHalfAngle}
-              onChange={(e) => setBeaconAntennaHalfAngle(Number(e.target.value))}
+              value={beaconAntennaHalfAngle === 0 ? '' : beaconAntennaHalfAngle.toString()}
+              onChange={(e) => {
+                const value = e.target.value;
+                // Allow empty input for better typing experience
+                if (value === '') {
+                  setBeaconAntennaHalfAngle(0);
+                } else {
+                  const parsedValue = parseFloat(value);
+                  // Only update if it's a valid number
+                  if (!isNaN(parsedValue)) {
+                    setBeaconAntennaHalfAngle(parsedValue);
+                  }
+                }
+              }}
               min="0"
               max="180"
+              step="0.1"
             />
+            <div className="focus-indicator"></div>
           </div>
         </div>
         
@@ -224,13 +274,27 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
           <div className="form-group">
             <label htmlFor="iridium-antenna">Antenna Half-Angle (degrees):</label>
             <input 
-              type="number" 
+              type="text" 
               id="iridium-antenna" 
-              value={iridiumAntennaHalfAngle}
-              onChange={(e) => setIridiumAntennaHalfAngle(Number(e.target.value))}
+              value={iridiumAntennaHalfAngle === 0 ? '' : iridiumAntennaHalfAngle.toString()}
+              onChange={(e) => {
+                const value = e.target.value;
+                // Allow empty input for better typing experience
+                if (value === '') {
+                  setIridiumAntennaHalfAngle(0);
+                } else {
+                  const parsedValue = parseFloat(value);
+                  // Only update if it's a valid number
+                  if (!isNaN(parsedValue)) {
+                    setIridiumAntennaHalfAngle(parsedValue);
+                  }
+                }
+              }}
               min="0"
               max="180"
+              step="0.1"
             />
+            <div className="focus-indicator"></div>
           </div>
           
           {/* Display selected satellite details */}
@@ -247,6 +311,9 @@ const OrbitForm: React.FC<OrbitFormProps> = ({ onSubmit, isLoading }) => {
                   </p>
                   <p>
                     <strong>Inclination:</strong> {iridiumSatellites.find(sat => sat.id === iridiumSatelliteId)?.inclination}°
+                  </p>
+                  <p>
+                    <strong>RAAN:</strong> {iridiumSatellites.find(sat => sat.id === iridiumSatelliteId)?.raan}°
                   </p>
                 </div>
               ) : (
